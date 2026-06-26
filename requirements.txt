@@ -1,0 +1,9 @@
+Flask
+Flask-SQLAlchemy
+Flask-JWT-Extended
+Flask-Cors
+PyMySQL
+python-dotenv
+openpyxl
+pytest
+reportlab
