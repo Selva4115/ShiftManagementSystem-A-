@@ -5,7 +5,7 @@ services:
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt gunicorn psycopg2-binary
-    startCommand: gunicorn "app.backend.app:create_app()" --bind 0.0.0.0:$PORT
+    startCommand: gunicorn wsgi:app
     envVars:
       - key: DATABASE_URL
         fromDatabase:
@@ -18,7 +18,7 @@ services:
       - key: SMTP_HOST
         value: smtp.gmail.com
       - key: SMTP_PORT
-        value: 587
+        value: "587"
       - key: SMTP_USER
         sync: false  # Will prompt you to input this on Render dashboard
       - key: SMTP_PASS
