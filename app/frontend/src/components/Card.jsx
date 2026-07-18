@@ -1,12 +1,16 @@
 import React from 'react';
 
-const Card = ({ title, children, extra, style }) => {
+const Card = ({ title, children, extra, style, className = '', onClick }) => {
   return (
-    <div className="card" style={{ ...cardStyle, ...style }}>
+    <div
+      className={`card ${className}`}
+      style={style}
+      onClick={onClick}
+    >
       {title && (
-        <div className="card-header" style={headerStyle}>
+        <div className="card-header">
           <h3 className="card-title">{title}</h3>
-          {extra && <div style={extraStyle}>{extra}</div>}
+          {extra && <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>{extra}</div>}
         </div>
       )}
       <div className="card-body">
@@ -14,24 +18,6 @@ const Card = ({ title, children, extra, style }) => {
       </div>
     </div>
   );
-};
-
-const cardStyle = {
-  marginBottom: '1rem',
-};
-
-const headerStyle = {
-  display: 'flex',
-  justifyContent: 'space-between',
-  alignItems: 'center',
-  paddingBottom: '0.75rem',
-  marginBottom: '1rem',
-  borderBottom: '1px solid var(--border-color)',
-};
-
-const extraStyle = {
-  fontSize: '0.875rem',
-  color: 'var(--text-secondary)',
 };
 
 export default Card;

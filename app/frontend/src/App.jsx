@@ -34,12 +34,24 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
 
 // Application Shell Layout (Sidebar + Topbar + Content Panel)
 const AppLayout = ({ children, title }) => {
+  const [collapsed, setCollapsed] = React.useState(() => {
+    return localStorage.getItem('sidebar-collapsed') === 'true';
+  });
+
+  const toggleCollapsed = () => {
+    setCollapsed(prev => {
+      const next = !prev;
+      localStorage.setItem('sidebar-collapsed', String(next));
+      return next;
+    });
+  };
+
   return (
-    <div className="app-container">
-      <Sidebar />
+    <div className={`app-container ${collapsed ? 'sidebar-collapsed' : ''}`}>
+      <Sidebar collapsed={collapsed} toggleCollapsed={toggleCollapsed} />
       <main className="main-content">
-        <Topbar title={title} />
-        <div style={contentInnerStyle} className="slide-up">
+        <Topbar title={title} collapsed={collapsed} toggleCollapsed={toggleCollapsed} />
+        <div className="page-content slide-up">
           {children}
         </div>
       </main>
@@ -47,9 +59,6 @@ const AppLayout = ({ children, title }) => {
   );
 };
 
-const contentInnerStyle = {
-  marginTop: '1.5rem',
-};
 
 const App = () => {
   return (

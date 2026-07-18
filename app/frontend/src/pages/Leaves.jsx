@@ -6,22 +6,23 @@ import Table from '../components/Table';
 import Modal from '../components/Modal';
 import Input from '../components/Input';
 import Button from '../components/Button';
-import { PlusCircle, CheckCircle, XCircle } from 'lucide-react';
+import { PlusCircle, Search, ArrowUpDown } from 'lucide-react';
+import { useToast } from '../context/ToastContext';
 
 const Leaves = () => {
-  const { user, isAdmin, isManager } = useAuth();
+  const { isAdmin, isManager } = useAuth();
   const isManagerOrAdmin = isAdmin || isManager;
+  const { addToast } = useToast();
 
   const [leaves, setLeaves] = useState([]);
   const [loading, setLoading] = useState(true);
-
-  // Modals
-  const [isSubmitModalOpen, setIsSubmitModalOpen] = useState(false);
-  const [isResolveModalOpen, setIsResolveModalOpen] = useState(false);
+  const [isSubmitOpen, setIsSubmitOpen] = useState(false);
+  const [isResolveOpen, setIsResolveOpen] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState('');
+  const [selectedLeave, setSelectedLeave] = useState(null);
+  const [filterStatus, setFilterStatus] = useState('all');
 
-  // Submit Request Form
   const [submitForm, setSubmitForm] = useState({
     leave_type: 'sick',
     start_date: new Date().toISOString().split('T')[0],
@@ -29,305 +30,337 @@ const Leaves = () => {
     reason: ''
   });
 
-  // Resolve Request Form
-  const [selectedLeave, setSelectedLeave] = useState(null);
-  const [resolveForm, setResolveForm] = useState({
-    action: 'approved', // 'approved' or 'rejected'
-    comments: ''
-  });
+  const [resolveForm, setResolveForm] = useState({ action: 'approved', comments: '' });
 
-  useEffect(() => {
-    fetchLeavesHistory();
-  }, []);
+  // Client-side search, sort, filter, pagination states
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sortField, setSortField] = useState('start_date');
+  const [sortDirection, setSortDirection] = useState('desc');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(5);
 
-  const fetchLeavesHistory = async () => {
+  useEffect(() => { fetchLeaves(); }, []);
+
+  const fetchLeaves = async () => {
     setLoading(true);
     try {
       const res = await client.get('/api/leaves');
       setLeaves(res.data);
-    } catch (err) {
-      console.error('Error fetching leave details:', err);
-    } finally {
-      setLoading(false);
-    }
+    } catch { console.error('Failed to fetch leaves'); }
+    finally { setLoading(false); }
   };
 
-  const openSubmitModal = () => {
-    setError('');
-    setSubmitForm({
-      leave_type: 'sick',
-      start_date: new Date().toISOString().split('T')[0],
-      end_date: new Date().toISOString().split('T')[0],
-      reason: ''
-    });
-    setIsSubmitModalOpen(true);
-  };
-
-  const handleSubmitRequest = async (e) => {
-    e.preventDefault();
-    setError('');
-    setActionLoading(true);
+  const handleSubmit = async (e) => {
+    e.preventDefault(); setError(''); setActionLoading(true);
     try {
       await client.post('/api/leaves', submitForm);
-      setIsSubmitModalOpen(false);
-      fetchLeavesHistory();
+      addToast('Leave Submitted', 'Your request has been sent for review.', 'success');
+      setIsSubmitOpen(false); fetchLeaves();
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to submit leave request');
-    } finally {
-      setActionLoading(false);
-    }
+      const msg = err.response?.data?.message || 'Failed to submit request';
+      setError(msg); addToast('Submission Failed', msg, 'error');
+    } finally { setActionLoading(false); }
   };
 
-  const openResolveModal = (leave) => {
-    setError('');
-    setSelectedLeave(leave);
-    setResolveForm({
-      action: 'approved',
-      comments: ''
-    });
-    setIsResolveModalOpen(true);
-  };
-
-  const handleResolveSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    setActionLoading(true);
+  const handleResolve = async (e) => {
+    e.preventDefault(); setError(''); setActionLoading(true);
     try {
       await client.post(`/api/leaves/${selectedLeave.id}/resolve`, resolveForm);
-      setIsResolveModalOpen(false);
-      fetchLeavesHistory();
+      addToast('Decision Saved', `Leave request ${resolveForm.action}.`, resolveForm.action === 'approved' ? 'success' : 'error');
+      setIsResolveOpen(false); fetchLeaves();
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to resolve leave request');
-    } finally {
-      setActionLoading(false);
-    }
+      const msg = err.response?.data?.message || 'Failed to resolve';
+      setError(msg); addToast('Failed', msg, 'error');
+    } finally { setActionLoading(false); }
   };
 
-  const getStatusBadge = (status) => {
-    switch (status) {
-      case 'approved': return <span className="badge badge-success">Approved</span>;
-      case 'rejected': return <span className="badge badge-danger">Rejected</span>;
-      default: return <span className="badge badge-warning">Pending</span>;
-    }
+  const openResolve = (leave) => {
+    setError(''); setSelectedLeave(leave);
+    setResolveForm({ action: 'approved', comments: '' });
+    setIsResolveOpen(true);
   };
 
-  if (loading && leaves.length === 0) {
-    return <div style={loaderStyle}>Loading Leave Files...</div>;
-  }
+  const statusBadge = (s) => {
+    const map = { approved: 'badge-success', rejected: 'badge-danger', pending: 'badge-warning' };
+    return <span className={`badge ${map[s] || 'badge-muted'}`}>{s}</span>;
+  };
+
+  const handleSort = (field) => {
+    if (sortField === field) {
+      setSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+    setCurrentPage(1);
+  };
+
+  const renderSortableHeader = (label, field) => {
+    const isSorted = sortField === field;
+    return (
+      <span onClick={() => handleSort(field)} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', cursor: 'pointer', select: 'none' }}>
+        {label}
+        <ArrowUpDown size={12} style={{ opacity: isSorted ? 1 : 0.35, color: isSorted ? 'var(--primary-color)' : 'inherit' }} />
+      </span>
+    );
+  };
+
+  // Filter leaves
+  const searchedLeaves = leaves.filter(l => {
+    const searchLower = searchTerm.toLowerCase();
+    const matchesSearch = 
+      String(l.employee_name || '').toLowerCase().includes(searchLower) ||
+      String(l.employee_id || '').toLowerCase().includes(searchLower) ||
+      String(l.reason || '').toLowerCase().includes(searchLower) ||
+      String(l.leave_type || '').toLowerCase().includes(searchLower);
+    
+    const matchesStatus = filterStatus === 'all' || l.status === filterStatus;
+    
+    return matchesSearch && matchesStatus;
+  });
+
+  // Sort leaves
+  const sortedLeaves = [...searchedLeaves].sort((a, b) => {
+    let valA = a[sortField];
+    let valB = b[sortField];
+    
+    if (sortField === 'name') {
+      valA = (a.employee_name || '').toLowerCase();
+      valB = (b.employee_name || '').toLowerCase();
+    } else if (sortField === 'id') {
+      valA = (a.employee_id || '').toLowerCase();
+      valB = (b.employee_id || '').toLowerCase();
+    } else if (typeof valA === 'string') {
+      valA = valA.toLowerCase();
+      valB = valB.toLowerCase();
+    }
+    
+    if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
+    if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  // Pagination leaves
+  const totalEntries = sortedLeaves.length;
+  const totalPages = Math.ceil(totalEntries / pageSize);
+  const paginatedLeaves = sortedLeaves.slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize
+  );
+
+  const renderSkeletons = () => {
+    return Array.from({ length: pageSize }).map((_, idx) => (
+      <tr key={idx} className="skeleton-row">
+        {isManagerOrAdmin ? (
+          <>
+            <td><span className="skeleton-text" style={{ width: '130px' }} /></td>
+            <td><span className="skeleton-text" style={{ width: '80px' }} /></td>
+            <td><span className="skeleton-text" style={{ width: '80px' }} /></td>
+            <td><span className="skeleton-text" style={{ width: '80px' }} /></td>
+            <td><span className="skeleton-text" style={{ width: '120px' }} /></td>
+            <td><span className="skeleton-text" style={{ width: '70px' }} /></td>
+            <td><span className="skeleton-text" style={{ width: '100px' }} /></td>
+            <td><span className="skeleton-text" style={{ width: '60px' }} /></td>
+          </>
+        ) : (
+          <>
+            <td><span className="skeleton-text" style={{ width: '80px' }} /></td>
+            <td><span className="skeleton-text" style={{ width: '80px' }} /></td>
+            <td><span className="skeleton-text" style={{ width: '80px' }} /></td>
+            <td><span className="skeleton-text" style={{ width: '120px' }} /></td>
+            <td><span className="skeleton-text" style={{ width: '70px' }} /></td>
+            <td><span className="skeleton-text" style={{ width: '100px' }} /></td>
+            <td><span className="skeleton-text" style={{ width: '130px' }} /></td>
+          </>
+        )}
+      </tr>
+    ));
+  };
+
+  const headers = isManagerOrAdmin
+    ? [
+        renderSortableHeader('Employee', 'name'),
+        renderSortableHeader('Type', 'leave_type'),
+        renderSortableHeader('From', 'start_date'),
+        renderSortableHeader('To', 'end_date'),
+        'Reason',
+        renderSortableHeader('Status', 'status'),
+        'Comments',
+        'Action'
+      ]
+    : [
+        renderSortableHeader('Type', 'leave_type'),
+        renderSortableHeader('From', 'start_date'),
+        renderSortableHeader('To', 'end_date'),
+        'Reason',
+        renderSortableHeader('Status', 'status'),
+        'Comments',
+        'Approved By'
+      ];
 
   return (
     <div className="fade-in">
-      <div style={headerStyle}>
-        <div>
+      <div className="page-header">
+        <div className="page-header-left">
           <h2>Leave Request Center</h2>
-          <p>Request vacation/medical leaves and review authorization history.</p>
+          <p>Manage vacation, medical, and casual leave requests.</p>
         </div>
-        {!isManagerOrAdmin && (
-          <Button variant="primary" onClick={openSubmitModal}>
-            <PlusCircle size={16} /> Request Leave
-          </Button>
-        )}
+        <div className="page-header-actions">
+          {!isManagerOrAdmin && (
+            <Button variant="primary" onClick={() => { setError(''); setIsSubmitOpen(true); }}>
+              <PlusCircle size={15} /> Request Leave
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Filter Tabs */}
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
+        {['all', 'pending', 'approved', 'rejected'].map(s => (
+          <button key={s} onClick={() => { setFilterStatus(s); setCurrentPage(1); }} className={`btn btn-sm ${filterStatus === s ? 'btn-primary' : 'btn-outline'}`} style={{ textTransform: 'capitalize' }}>
+            {s} {s !== 'all' && <span style={{ marginLeft: 4, opacity: 0.7 }}>({leaves.filter(l => l.status === s).length})</span>}
+          </button>
+        ))}
       </div>
 
       <Card>
-        <Table 
-          headers={
-            isManagerOrAdmin 
-              ? ['Emp ID', 'Employee Name', 'Leave Type', 'Start Date', 'End Date', 'Reason', 'Status', 'Comments', 'Actions']
-              : ['Leave Type', 'Start Date', 'End Date', 'Reason', 'Status', 'Comments', 'Approver ID']
-          }
-          isEmpty={leaves.length === 0}
-        >
-          {leaves.map((leave) => (
-            <tr key={leave.id}>
-              {isManagerOrAdmin && (
-                <>
-                  <td><strong>{leave.employee_id}</strong></td>
-                  <td>{leave.employee_name}</td>
-                </>
-              )}
-              <td style={{ textTransform: 'capitalize' }}>{leave.leave_type}</td>
-              <td>{leave.start_date}</td>
-              <td>{leave.end_date}</td>
-              <td><em>"{leave.reason}"</em></td>
-              <td>{getStatusBadge(leave.status)}</td>
-              <td>{leave.comments || '-'}</td>
-              
-              {isManagerOrAdmin ? (
-                <td>
-                  {leave.status === 'pending' ? (
-                    <Button variant="outline" onClick={() => openResolveModal(leave)} style={{ padding: '0.35rem 0.65rem', fontSize: '0.8rem' }}>
-                      Review
-                    </Button>
-                  ) : (
-                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Resolved</span>
-                  )}
-                </td>
-              ) : (
-                <td>{leave.approved_by || '-'}</td>
-              )}
-            </tr>
-          ))}
-        </Table>
-      </Card>
-
-      {/* 1. Request Submittal Modal */}
-      <Modal isOpen={isSubmitModalOpen} onClose={() => setIsSubmitModalOpen(false)} title="Submit Leave Request">
-        <form onSubmit={handleSubmitRequest}>
-          {error && <div style={errorStyle}>{error}</div>}
-
-          <Input
-            label="Leave Type"
-            id="leave_type"
-            name="leave_type"
-            type="select"
-            value={submitForm.leave_type}
-            onChange={(e) => setSubmitForm({ ...submitForm, leave_type: e.target.value })}
-            options={[
-              { value: 'sick', label: 'Sick Leave' },
-              { value: 'casual', label: 'Casual Leave' },
-              { value: 'earned', label: 'Earned Leave' },
-              { value: 'unpaid', label: 'Unpaid Leave' }
-            ]}
-            required
-          />
-
-          <div style={formRowStyle}>
-            <Input
-              label="Start Date"
-              id="start_date"
-              name="start_date"
-              type="date"
-              value={submitForm.start_date}
-              onChange={(e) => setSubmitForm({ ...submitForm, start_date: e.target.value })}
-              required
-            />
-            <Input
-              label="End Date"
-              id="end_date"
-              name="end_date"
-              type="date"
-              value={submitForm.end_date}
-              onChange={(e) => setSubmitForm({ ...submitForm, end_date: e.target.value })}
-              required
+        {/* Table Toolbar */}
+        <div className="table-toolbar">
+          <div className="topbar-search-container" style={{ width: '100%', maxWidth: '300px' }}>
+            <Search size={16} className="topbar-search-icon" />
+            <input 
+              type="text" 
+              placeholder="Search by name, ID, or reason..." 
+              value={searchTerm}
+              onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+              className="topbar-search-input"
+              style={{ width: '100%' }}
             />
           </div>
+          <div className="table-filters">
+            <select 
+              value={pageSize} 
+              onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }} 
+              className="table-select-filter"
+            >
+              <option value={5}>5 per page</option>
+              <option value={10}>10 per page</option>
+              <option value={25}>25 per page</option>
+            </select>
+          </div>
+        </div>
 
-          <Input
-            label="Detailed Reason"
-            id="reason"
-            name="reason"
-            type="textarea"
-            placeholder="Provide context explaining the request..."
-            value={submitForm.reason}
-            onChange={(e) => setSubmitForm({ ...submitForm, reason: e.target.value })}
-            required
-          />
+        <Table headers={headers} isEmpty={!loading && paginatedLeaves.length === 0}>
+          {loading ? (
+            renderSkeletons()
+          ) : (
+            paginatedLeaves.map(leave => (
+              <tr key={leave.id}>
+                {isManagerOrAdmin && (
+                  <td>
+                    <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{leave.employee_name}</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{leave.employee_id}</div>
+                  </td>
+                )}
+                <td style={{ textTransform: 'capitalize' }}>{leave.leave_type}</td>
+                <td style={{ fontSize: '0.85rem' }}>{leave.start_date}</td>
+                <td style={{ fontSize: '0.85rem' }}>{leave.end_date}</td>
+                <td style={{ fontSize: '0.82rem', maxWidth: 160, color: 'var(--text-secondary)' }}><em>"{leave.reason}"</em></td>
+                <td>{statusBadge(leave.status)}</td>
+                <td style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>{leave.comments || '—'}</td>
+                {isManagerOrAdmin ? (
+                  <td>
+                    {leave.status === 'pending'
+                      ? <Button variant="outline" size="sm" onClick={() => openResolve(leave)}>Review</Button>
+                      : <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Resolved</span>}
+                  </td>
+                ) : (
+                  <td style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>{leave.approved_by || '—'}</td>
+                )}
+              </tr>
+            ))
+          )}
+        </Table>
 
-          <div style={modalFooterStyle}>
-            <Button variant="outline" onClick={() => setIsSubmitModalOpen(false)}>Cancel</Button>
+        {/* Pagination Block */}
+        {!loading && totalPages > 1 && (
+          <div className="pagination-container">
+            <span className="pagination-info">
+              Showing {Math.min(totalEntries, (currentPage - 1) * pageSize + 1)} to {Math.min(totalEntries, currentPage * pageSize)} of {totalEntries} entries
+            </span>
+            <div className="pagination-buttons">
+              <button 
+                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                disabled={currentPage === 1}
+                className="pagination-btn"
+              >
+                Previous
+              </button>
+              {Array.from({ length: totalPages }).map((_, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => setCurrentPage(idx + 1)}
+                  className={`pagination-btn ${currentPage === idx + 1 ? 'pagination-btn-active' : ''}`}
+                >
+                  {idx + 1}
+                </button>
+              ))}
+              <button 
+                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                disabled={currentPage === totalPages}
+                className="pagination-btn"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {/* Submit Modal */}
+      <Modal isOpen={isSubmitOpen} onClose={() => setIsSubmitOpen(false)} title="Submit Leave Request">
+        <form onSubmit={handleSubmit}>
+          {error && <div className="alert-error">{error}</div>}
+          <Input label="Leave Type" id="leave_type" name="leave_type" type="select" value={submitForm.leave_type}
+            onChange={e => setSubmitForm({ ...submitForm, leave_type: e.target.value })}
+            options={[{ value: 'sick', label: 'Sick Leave' }, { value: 'casual', label: 'Casual Leave' }, { value: 'earned', label: 'Earned Leave' }, { value: 'unpaid', label: 'Unpaid Leave' }]} required />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.875rem' }}>
+            <Input label="Start Date" id="start_date" type="date" value={submitForm.start_date} onChange={e => setSubmitForm({ ...submitForm, start_date: e.target.value })} required />
+            <Input label="End Date" id="end_date" type="date" value={submitForm.end_date} onChange={e => setSubmitForm({ ...submitForm, end_date: e.target.value })} required />
+          </div>
+          <Input label="Reason" id="reason" type="textarea" placeholder="Provide a brief explanation..." value={submitForm.reason} onChange={e => setSubmitForm({ ...submitForm, reason: e.target.value })} required />
+          <div className="modal-footer">
+            <Button variant="outline" onClick={() => setIsSubmitOpen(false)}>Cancel</Button>
             <Button type="submit" variant="primary" loading={actionLoading}>Submit Request</Button>
           </div>
         </form>
       </Modal>
 
-      {/* 2. Review Resolution Modal */}
-      <Modal isOpen={isResolveModalOpen} onClose={() => setIsResolveModalOpen(false)} title="Review Leave Request">
+      {/* Resolve Modal */}
+      <Modal isOpen={isResolveOpen} onClose={() => setIsResolveOpen(false)} title="Review Leave Request">
         {selectedLeave && (
-          <form onSubmit={handleResolveSubmit}>
-            {error && <div style={errorStyle}>{error}</div>}
-
-            <div style={summaryBoxStyle}>
-              <p>Employee: <strong>{selectedLeave.employee_name} ({selectedLeave.employee_id})</strong></p>
-              <p>Type: <strong style={{ textTransform: 'capitalize' }}>{selectedLeave.leave_type}</strong></p>
-              <p>Dates: <strong>{selectedLeave.start_date} to {selectedLeave.end_date}</strong></p>
-              <p style={{ marginTop: '0.5rem' }}>Reason: <em>"{selectedLeave.reason}"</em></p>
+          <form onSubmit={handleResolve}>
+            {error && <div className="alert-error">{error}</div>}
+            <div style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '1rem', marginBottom: '1.25rem', fontSize: '0.875rem', lineHeight: 1.7 }}>
+              <div><strong>Employee:</strong> {selectedLeave.employee_name} ({selectedLeave.employee_id})</div>
+              <div><strong>Type:</strong> <span style={{ textTransform: 'capitalize' }}>{selectedLeave.leave_type}</span></div>
+              <div><strong>Dates:</strong> {selectedLeave.start_date} → {selectedLeave.end_date}</div>
+              <div><strong>Reason:</strong> <em>{selectedLeave.reason}</em></div>
             </div>
-
-            <Input
-              label="Authorization Action"
-              id="action"
-              name="action"
-              type="select"
-              value={resolveForm.action}
-              onChange={(e) => setResolveForm({ ...resolveForm, action: e.target.value })}
-              options={[
-                { value: 'approved', label: 'Approve Request' },
-                { value: 'rejected', label: 'Reject Request' }
-              ]}
-              required
-            />
-
-            <Input
-              label="Admin Comments / Remarks"
-              id="comments"
-              name="comments"
-              type="textarea"
-              placeholder="e.g. Leave approved as per quota rules..."
-              value={resolveForm.comments}
-              onChange={(e) => setResolveForm({ ...resolveForm, comments: e.target.value })}
-            />
-
-            <div style={modalFooterStyle}>
-              <Button variant="outline" onClick={() => setIsResolveModalOpen(false)}>Cancel</Button>
-              <Button type="submit" variant="primary" loading={actionLoading}>Save Decision</Button>
+            <Input label="Decision" id="action" type="select" value={resolveForm.action}
+              onChange={e => setResolveForm({ ...resolveForm, action: e.target.value })}
+              options={[{ value: 'approved', label: '✅ Approve Request' }, { value: 'rejected', label: '❌ Reject Request' }]} required />
+            <Input label="Comments (optional)" id="comments" type="textarea" placeholder="Add admin remarks..." value={resolveForm.comments}
+              onChange={e => setResolveForm({ ...resolveForm, comments: e.target.value })} />
+            <div className="modal-footer">
+              <Button variant="outline" onClick={() => setIsResolveOpen(false)}>Cancel</Button>
+              <Button type="submit" variant={resolveForm.action === 'approved' ? 'success' : 'danger'} loading={actionLoading}>Save Decision</Button>
             </div>
           </form>
         )}
       </Modal>
     </div>
   );
-};
-
-const loaderStyle = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  minHeight: '60vh',
-  fontSize: '1.25rem',
-  color: 'var(--text-secondary)',
-  fontWeight: '500',
-};
-
-const headerStyle = {
-  display: 'flex',
-  justifyContent: 'space-between',
-  alignItems: 'center',
-  marginBottom: '2rem',
-};
-
-const formRowStyle = {
-  display: 'grid',
-  gridTemplateColumns: '1fr 1fr',
-  gap: '1rem',
-};
-
-const modalFooterStyle = {
-  display: 'flex',
-  justifyContent: 'flex-end',
-  gap: '0.75rem',
-  marginTop: '1.5rem',
-};
-
-const errorStyle = {
-  backgroundColor: 'var(--danger-light)',
-  color: 'var(--danger-dark)',
-  padding: '0.75rem 1rem',
-  borderRadius: '8px',
-  marginBottom: '1rem',
-  fontSize: '0.875rem',
-  fontWeight: '500',
-};
-
-const summaryBoxStyle = {
-  backgroundColor: 'var(--bg-color)',
-  border: '1px solid var(--border-color)',
-  borderRadius: '8px',
-  padding: '1rem',
-  marginBottom: '1.25rem',
-  fontSize: '0.9rem',
-  color: 'var(--text-primary)',
-  lineHeight: '1.5',
 };
 
 export default Leaves;

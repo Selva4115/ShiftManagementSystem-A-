@@ -11,7 +11,7 @@ employee_bp = Blueprint('employee', __name__)
 
 @employee_bp.route('', methods=['GET'])
 @jwt_required()
-@role_required(['admin', 'manager'])
+@role_required(['admin', 'manager', 'employee'])
 def list_employees():
     """Returns a list of all employees in the database"""
     employees = Employee.query.all()
@@ -23,6 +23,7 @@ def list_employees():
 def create_employee():
     """Creates a new user credentials record and corresponding employee profile"""
     data = request.get_json() or {}
+    
     email = data.get('email')
     password = data.get('password')
     first_name = data.get('first_name')
@@ -50,10 +51,30 @@ def create_employee():
         db.session.flush()  # Flush to get user.id for employee record
 
         # Parse date
+        from datetime import datetime
         hire_date = None
         if hire_date_str:
-            from datetime import datetime
-            hire_date = datetime.strptime(hire_date_str, '%Y-%m-%d').date()
+            try:
+                hire_date = datetime.strptime(hire_date_str, '%Y-%m-%d').date()
+            except:
+                hire_date = datetime.utcnow().date()
+        else:
+            hire_date = datetime.utcnow().date()
+
+        # Handle empty department_id and role_id
+        dept_id = None
+        if department_id and department_id != '' and department_id != 'null':
+            try:
+                dept_id = int(department_id)
+            except:
+                dept_id = None
+                
+        role_id_val = None
+        if role_id and role_id != '' and role_id != 'null':
+            try:
+                role_id_val = int(role_id)
+            except:
+                role_id_val = None
 
         # Create Employee
         employee = Employee(
@@ -62,8 +83,8 @@ def create_employee():
             first_name=first_name,
             last_name=last_name,
             phone=phone,
-            department_id=department_id,
-            role_id=role_id,
+            department_id=dept_id,
+            role_id=role_id_val,
             hire_date=hire_date
         )
         db.session.add(employee)
@@ -71,7 +92,11 @@ def create_employee():
         return jsonify(employee.to_dict()), 201
     except Exception as e:
         db.session.rollback()
-        return jsonify({'message': 'Failed to create employee profile', 'error': str(e)}), 500
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Employee creation error: {str(e)}")
+        print(f"Traceback: {error_details}")
+        return jsonify({'message': 'Failed to create employee profile', 'error': str(e), 'details': error_details}), 500
 
 @employee_bp.route('/<emp_id>', methods=['GET'])
 @jwt_required()

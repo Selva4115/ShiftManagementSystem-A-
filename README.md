@@ -57,8 +57,8 @@ ShiftManagementSystem/
 
 ## 🔑 Default Session Credentials for Testing
 After launching the system for the first time, you can log in using the pre-seeded administrator credentials:
-- **Email**: `admin@shiftmanagement.com`
-- **Password**: `AdminPassword123`
+- **Email**: `admin@shift.com`
+- **Password**: `Admin@123`
 
 ---
 
@@ -89,6 +89,12 @@ After launching the system for the first time, you can log in using the pre-seed
    python -m app.backend.app
    ```
    *(The server will boot on `http://localhost:5000`)*
+
+> **Shortcut:** You can also start both backend and frontend together by running:
+> ```bash
+> python run_app.py
+> ```
+> or simply double-click `run_app.bat`
 
 ### 3. Frontend Installation & Run
 1. Navigate to the frontend directory:

@@ -139,3 +139,23 @@ lerna-debug.log*
 # System Files
 .DS_Store
 Thumbs.db
+
+# Local temporary/test scripts
+/check_*.bat
+/check_*.py
+/clear_*.py
+/demo_*.py
+/fix_*.bat
+/fix_*.py
+/measure_*.py
+/read_*.py
+/reset_*.py
+/reset_*.bat
+/restore_*.bat
+/restore_*.py
+/test_*.py
+/test_*.bat
+/update_*.py
+
+# Generated PDF reports
+app/backend/static/reports/*.pdf

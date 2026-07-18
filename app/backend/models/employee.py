@@ -25,18 +25,19 @@ class Employee(db.Model):
         current_year = datetime.utcnow().year
         prefix = f"EMP-{current_year}-"
         
-        # Get all IDs starting with prefix to find the max suffix
-        latest_employee = Employee.query.filter(Employee.id.like(f"{prefix}%")).order_by(Employee.id.desc()).first()
+        # Get all matching IDs to find the true numeric maximum suffix
+        emp_ids = db.session.query(Employee.id).filter(Employee.id.like(f"{prefix}%")).all()
         
-        if latest_employee:
+        max_number = 0
+        for (emp_id,) in emp_ids:
             try:
-                last_number = int(latest_employee.id.split('-')[-1])
-                new_number = last_number + 1
+                last_num = int(emp_id.split('-')[-1])
+                if last_num > max_number:
+                    max_number = last_num
             except (ValueError, IndexError):
-                new_number = 1
-        else:
-            new_number = 1
-            
+                continue
+                
+        new_number = max_number + 1
         return f"{prefix}{new_number:04d}"
 
     def to_dict(self):

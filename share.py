@@ -4,181 +4,194 @@ import re
 import subprocess
 import time
 import socket
+import threading
 
-# Enable ANSI colors on Windows Command Prompt
 os.system('')
 
-COLOR_GREEN = "\033[92m"
+COLOR_GREEN  = "\033[92m"
 COLOR_YELLOW = "\033[93m"
-COLOR_RED = "\033[91m"
-COLOR_CYAN = "\033[96m"
-COLOR_RESET = "\033[0m"
-COLOR_BOLD = "\033[1m"
+COLOR_RED    = "\033[91m"
+COLOR_CYAN   = "\033[96m"
+COLOR_RESET  = "\033[0m"
+COLOR_BOLD   = "\033[1m"
 
-def log_info(msg):
-    print(f"{COLOR_CYAN}[INFO]{COLOR_RESET} {msg}")
+def log_info(msg):    print(f"{COLOR_CYAN}[INFO]{COLOR_RESET} {msg}")
+def log_success(msg): print(f"{COLOR_GREEN}[SUCCESS]{COLOR_RESET} {msg}")
+def log_warn(msg):    print(f"{COLOR_YELLOW}[WARN]{COLOR_RESET} {msg}")
+def log_err(msg):     print(f"{COLOR_RED}[ERROR]{COLOR_RESET} {msg}")
 
-def log_success(msg):
-    print(f"{COLOR_GREEN}[SUCCESS]{COLOR_RESET} {msg}")
+def port_open(port, timeout=1):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(timeout)
+        return s.connect_ex(('localhost', port)) == 0
 
-def log_warn(msg):
-    print(f"{COLOR_YELLOW}[WARN]{COLOR_RESET} {msg}")
-
-def log_err(msg):
-    print(f"{COLOR_RED}[ERROR]{COLOR_RESET} {msg}")
+def wait_for_port(port, label, max_wait=30):
+    log_info(f"Waiting for {label} on port {port}...")
+    for _ in range(max_wait):
+        if port_open(port):
+            log_success(f"{label} is ready on port {port}")
+            return True
+        time.sleep(1)
+    log_warn(f"{label} did not start in time on port {port}")
+    return False
 
 def check_ssh_key():
     ssh_dir = os.path.expanduser("~/.ssh")
     key_path = os.path.join(ssh_dir, "id_rsa")
     if not os.path.exists(key_path):
-        log_warn("No SSH key pair found. Generating one automatically...")
+        log_warn("No SSH key found. Generating one...")
         os.makedirs(ssh_dir, exist_ok=True)
         try:
-            # Generate SSH key pair
-            # -t rsa -b 2048 -N "" (empty passphrase) -f key_path
-            subprocess.run([
-                "ssh-keygen", "-t", "rsa", "-b", "2048", "-N", "", "-f", key_path
-            ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            log_success(f"SSH Key generated successfully at: {key_path}")
+            subprocess.run(["ssh-keygen", "-t", "rsa", "-b", "2048", "-N", "", "-f", key_path],
+                           check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            log_success(f"SSH key generated at {key_path}")
         except Exception as e:
-            log_err(f"Failed to generate SSH key automatically: {e}")
-            log_info("Please ensure OpenSSH is installed or run 'ssh-keygen' manually in command prompt.")
+            log_err(f"Could not generate SSH key: {e}")
     else:
-        log_info(f"Existing SSH key found at: {key_path}")
+        log_info(f"SSH key found at {key_path}")
 
-def get_frontend_port():
-    # Detect which port the Vite React frontend is currently running on
-    for port in [3000, 3001, 3002]:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(0.5)
-            if s.connect_ex(('localhost', port)) == 0:
-                return port
-    # Fallback to 3000 if none detected active yet
-    return 3000
-
-def run_tunnel():
-    # Detect active port
-    port = get_frontend_port()
-    log_info(f"Detected active React frontend port: {COLOR_BOLD}{port}{COLOR_RESET}")
-
-    # Open default web browser automatically to the client
-    try:
-        import webbrowser
-        log_info(f"Opening web browser on http://localhost:{port}...")
-        webbrowser.open(f"http://localhost:{port}")
-    except Exception as e:
-        log_warn(f"Failed to open web browser automatically: {e}")
-
-    # Tunnel configurations: Pinggy (Port 443), Serveo (Port 22)
+def tunnel_port(port, label, result_store, key):
+    """Open a Serveo tunnel for a given port and store the URL."""
     tunnels = [
         {
-            "name": "Pinggy (Port 443 - Firewall Bypass)",
-            "cmd": ["ssh", "-tt", "-o", "StrictHostKeyChecking=no", "-p", "443", "-R", f"80:localhost:{port}", "free.pinggy.io"],
-            "url_pattern": r"https://[a-zA-Z0-9.-]+\.pinggy\.link"
+            "name": "Pinggy",
+            "cmd": ["ssh", "-tt", "-o", "StrictHostKeyChecking=no", "-p", "443",
+                    "-R", f"80:localhost:{port}", "free.pinggy.io"],
+            "pattern": r"https://[a-zA-Z0-9.-]+\.pinggy\.link"
         },
         {
-            "name": "Serveo (Port 22 - Fallback)",
-            "cmd": ["ssh", "-o", "StrictHostKeyChecking=no", "-R", f"80:localhost:{port}", "serveo.net"],
-            "url_pattern": r"https://[a-zA-Z0-9.-]+\.(?:serveo\.net|serveousercontent\.com)"
+            "name": "Serveo",
+            "cmd": ["ssh", "-o", "StrictHostKeyChecking=no",
+                    "-R", f"80:localhost:{port}", "serveo.net"],
+            "pattern": r"https://[a-zA-Z0-9.-]+\.(?:serveo\.net|serveousercontent\.com)"
         }
     ]
 
-    for tunnel in tunnels:
-        name = tunnel["name"]
-        cmd = tunnel["cmd"]
-        pattern = tunnel["url_pattern"]
-
-        log_info(f"Attempting to establish public sharing link via {COLOR_BOLD}{name}{COLOR_RESET}...")
-        
+    for t in tunnels:
+        log_info(f"Tunneling {label} (port {port}) via {t['name']}...")
         try:
-            # We redirect stderr to stdout to capture everything
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1
+            proc = subprocess.Popen(
+                t["cmd"],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, bufsize=1, encoding='utf-8', errors='ignore'
             )
-            
-            # Read output stream in real-time to find the URL
-            url_found = None
-            start_time = time.time()
-            buffer = ""
-            
-            # We read character by character because Pinggy uses carriage returns (\r)
-            # which would block if we read line by line.
+            buf = ""
+            start = time.time()
             while True:
-                # Check if process has terminated
-                if process.poll() is not None:
-                    log_warn(f"Tunnel process for {name} terminated with exit status {process.returncode}")
+                if proc.poll() is not None:
                     break
-                
-                # Check for timeout (e.g. 12 seconds to get a link)
-                if time.time() - start_time > 12:
-                    log_warn(f"Timeout waiting for public URL from {name}.")
-                    process.terminate()
+                if time.time() - start > 20:
+                    proc.terminate()
                     break
-
-                # Read one character
-                char = process.stdout.read(1)
-                if not char:
-                    time.sleep(0.1)
+                ch = proc.stdout.read(1)
+                if not ch:
+                    time.sleep(0.05)
                     continue
-                
-                buffer += char
-                if len(buffer) > 5000:
-                    buffer = buffer[-2500:] # Keep buffer size reasonable
-                
-                # Search for URL in buffer
-                match = re.search(pattern, buffer)
-                if match:
-                    url_found = match.group(0)
-                    break
-            
-            if url_found:
-                log_success(f"Public Sharing Link Generated successfully!")
-                
-                # Write to public_link.txt in root
-                with open("public_link.txt", "w") as f:
-                    f.write(url_found)
-                
-                # Display beautiful high-contrast banner
-                print("\n" + "="*70)
-                print(f" {COLOR_GREEN}{COLOR_BOLD}★ SHIFTFLOW PUBLIC ACCESS ONLINE ★{COLOR_RESET}")
-                print("="*70)
-                print(f" Local Web Access:    {COLOR_BOLD}http://localhost:{port}{COLOR_RESET}")
-                print(f" Backend REST API:    {COLOR_BOLD}http://localhost:5000{COLOR_RESET}")
-                print(f" Public Share Link:   {COLOR_GREEN}{COLOR_BOLD}{url_found}{COLOR_RESET}")
-                print("-"*70)
-                print(" Share the Public Link above with team members or open it on mobile.")
-                print(" Note: The tunnel will stay active as long as this terminal is open.")
-                print("="*70 + "\n")
-                
-                # Keep running and consuming output so the pipe doesn't fill up
-                while True:
-                    if process.poll() is not None:
-                        log_warn("Public sharing connection lost. Retrying fallback...")
-                        break
-                    # Read output to prevent blocking
-                    char = process.stdout.read(1)
-                    if not char:
-                        time.sleep(0.5)
-            else:
-                # Terminate and try next fallback
-                process.terminate()
-                process.wait()
-                
+                buf += ch
+                if len(buf) > 5000:
+                    buf = buf[-2500:]
+                m = re.search(t["pattern"], buf)
+                if m:
+                    url = m.group(0)
+                    result_store[key] = (url, proc)
+                    log_success(f"{label} public URL: {COLOR_BOLD}{url}{COLOR_RESET}")
+                    # Keep consuming so pipe doesn't block
+                    def drain(p):
+                        while p.poll() is None:
+                            p.stdout.read(1)
+                    threading.Thread(target=drain, args=(proc,), daemon=True).start()
+                    return
+            proc.terminate()
         except Exception as e:
-            log_err(f"Error running tunnel {name}: {e}")
-            continue
-            
-    log_err("All secure sharing tunnel methods failed. Please check your internet connection or run manually.")
-    # Keep the script running to let the user see the error
+            log_err(f"Tunnel error for {label}: {e}")
+    log_err(f"All tunnels failed for {label} port {port}")
+
+def run_tunnel():
+    # Wait for both servers
+    wait_for_port(5000, "Flask Backend")
+    wait_for_port(3000, "Vite Frontend")
+
+    results = {}
+
+    # Tunnel both ports in parallel threads
+    t1 = threading.Thread(target=tunnel_port, args=(3000, "Frontend", results, "frontend"), daemon=True)
+    t2 = threading.Thread(target=tunnel_port, args=(5000, "Backend API", results, "backend"), daemon=True)
+    t1.start()
+    t2.start()
+    t1.join(timeout=25)
+    t2.join(timeout=25)
+
+    frontend_url = results.get("frontend", (None,))[0]
+    backend_url  = results.get("backend",  (None,))[0]
+
+    if not frontend_url:
+        log_err("Could not get a public URL for the frontend.")
+        log_info("Try opening http://localhost:3000 locally.")
+    else:
+        # No need to patch the client file because we use a relative proxy (baseURL: '')
+        # if backend_url:
+        #     _patch_api_client(backend_url)
+
+        # Save link
+        with open("public_link.txt", "w") as f:
+            f.write(frontend_url)
+
+        print("\n" + "="*70)
+        print(f" {COLOR_GREEN}{COLOR_BOLD}*  SHIFTFLOW PUBLIC ACCESS ONLINE  *{COLOR_RESET}")
+        print("="*70)
+        print(f"  Local Frontend :  {COLOR_BOLD}http://localhost:3000{COLOR_RESET}")
+        print(f"  Local Backend  :  {COLOR_BOLD}http://localhost:5000{COLOR_RESET}")
+        print(f"  Public Link    :  {COLOR_GREEN}{COLOR_BOLD}{frontend_url}{COLOR_RESET}")
+        if backend_url:
+            print(f"  Public API     :  {COLOR_CYAN}{backend_url}{COLOR_RESET}")
+        print("-"*70)
+        print("  Share the Public Link above with anyone on any device.")
+        print("  Keep this terminal open to maintain the connection.")
+        print("="*70 + "\n")
+
+    # Keep alive
     try:
         while True:
             time.sleep(10)
     except KeyboardInterrupt:
-        pass
+        _restore_api_client()
+        log_info("Sharing stopped. API client restored to local proxy.")
+
+def _patch_api_client(backend_url):
+    """Temporarily point the API client at the public backend URL."""
+    client_path = os.path.join("app", "frontend", "src", "api", "client.js")
+    try:
+        with open(client_path, "r") as f:
+            content = f.read()
+        # Replace baseURL
+        patched = re.sub(
+            r"baseURL:\s*['\"].*?['\"]",
+            f"baseURL: '{backend_url}'",
+            content
+        )
+        with open(client_path, "w") as f:
+            f.write(patched)
+        log_success(f"API client patched to use: {backend_url}")
+        # Save original for restore
+        with open(".api_client_backup", "w") as f:
+            f.write(content)
+    except Exception as e:
+        log_warn(f"Could not patch API client: {e}")
+
+def _restore_api_client():
+    """Restore original API client after sharing stops."""
+    client_path = os.path.join("app", "frontend", "src", "api", "client.js")
+    backup_path = ".api_client_backup"
+    try:
+        if os.path.exists(backup_path):
+            with open(backup_path, "r") as f:
+                content = f.read()
+            with open(client_path, "w") as f:
+                f.write(content)
+            os.remove(backup_path)
+            log_success("API client restored to original (localhost proxy).")
+    except Exception as e:
+        log_warn(f"Could not restore API client: {e}")
 
 if __name__ == "__main__":
     check_ssh_key()

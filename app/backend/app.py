@@ -46,32 +46,17 @@ def create_app(config_class=Config):
     # Bootstrapping logic inside application context
     with app.app_context():
         try:
-            # Disable foreign key checks to allow dropping tables with relationships in MySQL
-            try:
-                db.session.execute(db.text("SET FOREIGN_KEY_CHECKS = 0;"))
-                db.session.commit()
-            except Exception:
-                pass
-
-            # Drop all tables first to force ENUM column updates in MySQL
-            db.drop_all()
-
-            # Re-enable foreign key checks
-            try:
-                db.session.execute(db.text("SET FOREIGN_KEY_CHECKS = 1;"))
-                db.session.commit()
-            except Exception:
-                pass
-
-            # Create tables if they do not exist
+            # Only create tables if they don't exist
             db.create_all()
+        except Exception as e:
+            app.logger.error(f"Database table creation check: {str(e)}")
             
+        try:
             # Seed default records if database is empty and not in testing
             if not app.config.get('TESTING'):
                 seed_database()
-            
         except Exception as e:
-            app.logger.error(f"Error during database initialization: {str(e)}")
+            app.logger.error(f"Error during database seeding: {str(e)}")
 
     return app
 
@@ -121,6 +106,11 @@ def seed_database():
         admin.set_password("AdminPassword123")
         db.session.add(admin)
         db.session.flush()
+    else:
+        # Always ensure admin password is correct
+        admin_user.set_password("AdminPassword123")
+        db.session.flush()
+        admin = admin_user
 
         # Create Profile
         first_dept = Department.query.first()
@@ -149,26 +139,31 @@ def seed_database():
         manager.set_password("ManagerPassword123")
         db.session.add(manager)
         db.session.flush()
+    else:
+        manager_user.set_password("ManagerPassword123")
+        db.session.flush()
+        manager = manager_user
 
-        depts = Department.query.all()
-        roles = Role.query.all()
-        dept_id = depts[1].id if len(depts) > 1 else (depts[0].id if depts else None)
-        role_id = roles[1].id if len(roles) > 1 else (roles[0].id if roles else None)
+    # Ensure Manager profile exists
+    depts = Department.query.all()
+    roles = Role.query.all()
+    dept_id = depts[1].id if len(depts) > 1 else (depts[0].id if depts else None)
+    role_id = roles[1].id if len(roles) > 1 else (roles[0].id if roles else None)
 
-        manager_profile = Employee.query.filter_by(id="EMP-2026-9999").first()
-        if not manager_profile:
-            manager_profile = Employee(
-                id="EMP-2026-9999",
-                user_id=manager.id,
-                first_name="Shift",
-                last_name="Manager",
-                phone="+15550999",
-                department_id=dept_id,
-                role_id=role_id,
-                hire_date=date(2026, 1, 1),
-                status="active"
-            )
-            db.session.add(manager_profile)
+    manager_profile = Employee.query.filter_by(id="EMP-2026-9999").first()
+    if not manager_profile:
+        manager_profile = Employee(
+            id="EMP-2026-9999",
+            user_id=manager.id,
+            first_name="Shift",
+            last_name="Manager",
+            phone="+15550999",
+            department_id=dept_id,
+            role_id=role_id,
+            hire_date=date(2026, 1, 1),
+            status="active"
+        )
+        db.session.add(manager_profile)
 
     # Seed Default Employee User & Profile
     employee_user = User.query.filter_by(email="employee@shiftmanagement.com").first()
@@ -177,26 +172,29 @@ def seed_database():
         employee.set_password("EmployeePassword123")
         db.session.add(employee)
         db.session.flush()
+    else:
+        employee_user.set_password("EmployeePassword123")
+        db.session.flush()
+        employee = employee_user
 
-        depts = Department.query.all()
-        roles = Role.query.all()
-        dept_id = depts[2].id if len(depts) > 2 else (depts[0].id if depts else None)
-        role_id = roles[2].id if len(roles) > 2 else (roles[0].id if roles else None)
+    # Ensure Employee profile exists
+    dept_id = depts[2].id if len(depts) > 2 else (depts[0].id if depts else None)
+    role_id = roles[2].id if len(roles) > 2 else (roles[0].id if roles else None)
 
-        employee_profile = Employee.query.filter_by(id="EMP-2026-8888").first()
-        if not employee_profile:
-            employee_profile = Employee(
-                id="EMP-2026-8888",
-                user_id=employee.id,
-                first_name="John",
-                last_name="Employee",
-                phone="+15550888",
-                department_id=dept_id,
-                role_id=role_id,
-                hire_date=date(2026, 1, 1),
-                status="active"
-            )
-            db.session.add(employee_profile)
+    employee_profile = Employee.query.filter_by(id="EMP-2026-8888").first()
+    if not employee_profile:
+        employee_profile = Employee(
+            id="EMP-2026-8888",
+            user_id=employee.id,
+            first_name="John",
+            last_name="Employee",
+            phone="+15550888",
+            department_id=dept_id,
+            role_id=role_id,
+            hire_date=date(2026, 1, 1),
+            status="active"
+        )
+        db.session.add(employee_profile)
 
     # 5. Seed 55 Mock Employees for rich analytics & paging
     if Employee.query.count() < 10:
