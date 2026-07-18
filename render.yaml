@@ -3,6 +3,7 @@ services:
   - type: web
     name: shiftflow-backend
     env: python
+    plan: free
     buildCommand: pip install -r requirements.txt gunicorn psycopg2-binary
     startCommand: gunicorn "app.backend.app:create_app()" --bind 0.0.0.0:$PORT
     envVars:
