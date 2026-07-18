@@ -9,6 +9,9 @@ from datetime import timedelta
 def create_database_if_not_exists(app):
     if app.config.get('TESTING'):
         return
+    db_uri = app.config.get('SQLALCHEMY_DATABASE_URI', '')
+    if 'mysql' not in db_uri:
+        return
     import pymysql
     user = os.environ.get('DB_USER', 'root')
     password = os.environ.get('DB_PASSWORD', '')
