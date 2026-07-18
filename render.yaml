@@ -24,9 +24,8 @@ services:
         sync: false  # Will prompt you to input this on Render dashboard
 
   # 2. Vite React Frontend Static Site
-  - type: web
+  - type: static
     name: shiftflow-frontend
-    env: static
     rootDir: app/frontend
     buildCommand: npm install && npm run build
     publishPath: dist
@@ -35,7 +34,7 @@ services:
         fromService:
           type: web
           name: shiftflow-backend
-          property: host
+          property: url
     routes:
       - type: rewrite
         source: /*
