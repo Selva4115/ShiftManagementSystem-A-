@@ -42,7 +42,12 @@ def create_app(config_class=Config):
 
     # Register blueprints (routes)
     register_blueprints(app)
-
+    @app.route("/")
+    def home():
+      return {
+        "status": "success",
+        "message": "Shift Management System API is Running!"
+    }
     # Register global error handler
     app.register_error_handler(Exception, handle_api_error)
 
